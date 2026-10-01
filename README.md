@@ -59,39 +59,33 @@
 
 ### `search_listings`
 
-- **What it does:**
-- **Inputs:** <!-- name and type each: `max_price` (float), not "a price" -->
-- **Returns:**
-- **When it has nothing:**
+- **What it does:** Searches the clothing listings for items matching the user's description, size, and maximum price.
+- **Inputs:** `description` (str), `size` (str or None), `max_price` (float or None).
+- **Returns:** A list of matching listing dictionaries containing fields such as `id`, `title`, `description`, `category`, `style_tags`, `size`, `condition`, `price`, `colors`, `brand`, and `platform`.
+- **Empty case:** Returns an empty list `[]` when no listings match.
 
 ### `suggest_outfit`
 
-- **What it does:**
-- **Inputs:**
-- **Returns:**
-- **When it has nothing:**
+- **What it does:** Suggests one or two outfits using the thrifted item and the user's wardrobe.
+- **Inputs:** `new_item` (dict), `wardrobe` (dict with an `items` list).
+- **Returns:** A non-empty string containing outfit suggestions.
+- **When it has nothing:** If the wardrobe is empty, returns general styling advice instead of failing or returning an empty string.
 
 ### `create_fit_card`
 
-- **What it does:**
-- **Inputs:**
-- **Returns:**
-- **When it has nothing:**
+### `create_fit_card`
 
+- **What it does:** Creates a short social-style caption about the selected thrift find and outfit.
+- **Inputs:** `outfit` (str), `new_item` (dict).
+- **Returns:** A 2–4 sentence caption that mentions the item, price, platform, and describes the vibe.
+- **When it has nothing:** If `outfit` is empty or whitespace, returns a descriptive message instead of raising an error.
 ---
 
 ## Planning Loop
 
-<!-- Your branch rule, stated as a rule — the condition AND both paths — plus
-     the file and function that holds it.
+**Branch rule:** If `search_listings` returns an empty list, put a helpful message in the session and stop. Otherwise, take the first result, save it as the selected item, and continue to `suggest_outfit`.
 
-     Like this:
-       "If search_listings returns an empty list, put a message in the session
-        and stop. Otherwise take the first result and go to suggest_outfit."
-        — agent.py::run_agent
-
-     The grader checks your code against what you claim here, so the file and
-     function have to be real. -->
+**Implementation location:** `agent.py::run_agent`
 
 **Branch rule:**
 
