@@ -13,10 +13,9 @@
 > python app.py ask 'vintage graphic tee under $30'
 > ```
 >
-> All three tools are stubs, so that last command will do nothing useful yet.
-> That's the starting position.
+> The Unit 3 tools and planning loop are now implemented.
 >
-> **The rest of this file is your submission.** Fill it in as you go.
+> **The rest of this file is the submission.**
 
 ---
 
@@ -39,117 +38,235 @@
 
 ## What This Does
 
-<!-- Three or four sentences: what a user asks for, and what they get back. -->
+FitFindr is a thrift-shopping assistant that accepts a clothing request written
+in plain language, such as `vintage graphic tee under $30`.
 
+The agent parses the request into a description, optional size, and optional
+maximum price. It searches the available thrift listings, chooses the strongest
+matching item, and combines that item with pieces from the user's existing
+wardrobe to suggest one or two outfits.
 
+Finally, FitFindr creates a short social-style fit card that includes the
+selected item, its price, resale platform, and the overall outfit vibe.
+
+If no listing matches the request, the agent stops before outfit generation and
+tells the user to change the description, size, or maximum price.
 
 ---
 
 ## Tool Inventory
 
-<!-- Four lines per tool. This is worth 2 points and it's the single most
-     common place students lose them.
-
-     "Returns a list" earns NOTHING. The description has to say what is IN
-     the list.
-
-     The empty case isn't optional either — it's the thing your loop branches
-     on, and if you don't decide it here you'll discover it as a crash in
-     Milestone 5. -->
-
 ### `search_listings`
 
-- **What it does:** Searches the clothing listings for items matching the user's description, size, and maximum price.
-- **Inputs:** `description` (str), `size` (str or None), `max_price` (float or None).
-- **Returns:** A list of matching listing dictionaries containing fields such as `id`, `title`, `description`, `category`, `style_tags`, `size`, `condition`, `price`, `colors`, `brand`, and `platform`.
+- **What it does:** Searches clothing listings using description keywords and optional size and maximum-price filters.
+- **Inputs:** `description` (`str`), `size` (`str` or `None`), `max_price` (`float` or `None`).
+- **Returns:** A list of matching listing dictionaries containing fields such as `id`, `title`, `description`, `category`, `style_tags`, `size`, `condition`, `price`, `colors`, `brand`, and `platform`, with stronger keyword matches first.
 - **Empty case:** Returns an empty list `[]` when no listings match.
 
 ### `suggest_outfit`
 
-- **What it does:** Suggests one or two outfits using the thrifted item and the user's wardrobe.
-- **Inputs:** `new_item` (dict), `wardrobe` (dict with an `items` list).
-- **Returns:** A non-empty string containing outfit suggestions.
-- **When it has nothing:** If the wardrobe is empty, returns general styling advice instead of failing or returning an empty string.
+- **What it does:** Suggests one or two outfits combining the selected thrift item with pieces from the user's existing wardrobe.
+- **Inputs:** `new_item` (`dict`), `wardrobe` (`dict` containing an `items` list).
+- **Returns:** A non-empty string containing one or two outfit suggestions and short explanations of why the pieces work together.
+- **Empty case:** If the wardrobe has no items, returns general styling advice instead of failing or returning an empty string.
 
 ### `create_fit_card`
 
-### `create_fit_card`
+- **What it does:** Creates a short social-media-style caption about the selected thrift find and outfit.
+- **Inputs:** `outfit` (`str`), `new_item` (`dict`).
+- **Returns:** A 2–4 sentence caption that mentions the item, price, platform, and overall outfit vibe.
+- **Empty case:** If `outfit` is empty or whitespace, returns a descriptive message instead of raising an exception.
 
-- **What it does:** Creates a short social-style caption about the selected thrift find and outfit.
-- **Inputs:** `outfit` (str), `new_item` (dict).
-- **Returns:** A 2–4 sentence caption that mentions the item, price, platform, and describes the vibe.
-- **When it has nothing:** If `outfit` is empty or whitespace, returns a descriptive message instead of raising an error.
 ---
 
 ## Planning Loop
 
-**Branch rule:** If `search_listings` returns an empty list, put a helpful message in the session and stop. Otherwise, take the first result, save it as the selected item, and continue to `suggest_outfit`.
-
-**Implementation location:** `agent.py::run_agent`
-
-**Branch rule:**
+**Branch rule:** If `search_listings` returns an empty list, store a helpful
+message in `session["error"]` and immediately stop. Do not call
+`suggest_outfit` or `create_fit_card`. Otherwise, choose the first search
+result, save it in `session["selected_item"]`, generate an outfit, generate a
+fit card, and return the completed session.
 
 **Where it lives:** `agent.py::run_agent`
 
-**How the query is parsed:** <!-- regex, string splitting, or asking the model — say which -->
+**How the query is parsed:** The query is parsed with regular expressions in
+`parse_query()`. It looks for a maximum price after phrases such as `under`,
+`below`, or `up to`, and looks for a size after the word `size`. Those parts are
+removed from the query and the remaining text becomes the search description.
 
-**What moves through the session:** <!-- which fields, in what order -->
+For example:
+
+```text
+vintage graphic tee size M under $30
+```
+
+becomes approximately:
+
+```python
+{
+    "description": "vintage graphic tee",
+    "size": "M",
+    "max_price": 30.0
+}
+```
+
+**What moves through the session:** The session starts with the original query
+and wardrobe. The parsed query is stored in `session["parsed"]`, search results
+go into `session["search_results"]`, the first result is stored in
+`session["selected_item"]`, the generated outfit goes into
+`session["outfit_suggestion"]`, and the final caption goes into
+`session["fit_card"]`.
+
+The main state flow is:
+
+```text
+query
+  ↓
+parsed
+  ↓
+search_results
+  ↓
+selected_item
+  ↓
+outfit_suggestion
+  ↓
+fit_card
+```
+
+The loop also increments an iteration counter and calls:
+
+```python
+trace.check_iterations(count)
+```
+
+on every iteration so the agent cannot continue indefinitely if a branch fails
+to terminate.
 
 ---
 
 ## Sample Run
 
-<!-- Two things go here.
+### One full query
 
-     1. One FULL query and its output, pasted as text.
-     2. Your three per-tool terminal tests — the command and what it printed. -->
+```text
+$ python app.py ask 'vintage graphic tee under $30'
 
-**One full query**
+  Found:    Y2K Baby Tee — Butterfly Print — $18.0 on depop
 
+  Outfit:   Here are two ways to style your new Y2K butterfly baby tee using pieces from your existing wardrobe:
+
+### Outfit 1: 2000s Streetwear Contrast
+* **Top:** Y2K Baby Tee — Butterfly Print (worn over or under)
+* **Bottoms:** Baggy straight-leg jeans (dark wash)
+* **Outerwear:** Black cropped zip hoodie
+* **Shoes:** Chunky white sneakers
+* **Accessories:** Black crossbody bag
+
+**Why it works:** This leans into the authentic Y2K aesthetic by playing with proportions. The fitted, feminine butterfly tee is balanced out by the ultra-baggy dark wash jeans and the chunky white sneakers. Tossing the black cropped zip hoodie on top keeps the silhouette sharp and pulls in the black accents from the accessories.
+
+---
+
+### Outfit 2: Casual Soft-Grunge
+* **Top:** Y2K Baby Tee — Butterfly Print
+* **Bottoms:** Wide-leg khaki trousers
+* **Outerwear:** Vintage black denim jacket
+* **Shoes:** Black combat boots
+* **Accessories:** Brown leather belt, Black crossbody bag
+
+**Why it works:** This outfit mixes your cottagecore/vintage top with edgier, utilitarian pieces. The pink and purple butterfly print pops against the neutral khaki wide-leg trousers,while the vintage black denim jacket and combat boots add a grounded, grunge contrast that keeps the sweetness of the baby tee from feeling too precious.
+
+  Fit card: Found my ultimate Y2K aesthetic with this butterfly baby tee for only $18.00 onDepop. I paired it with baggy jeans and a cropped hoodie for that perfect 2000s streetwear contrast. Honestly obsessed with how easy this piece is to style!
+
+0 model calls this session, 2 served from cache
 ```
-$ python app.py ask '...'
 
+### Empty-search branch
+
+```text
+$ python app.py ask 'designer ballgown size XXS under $5'
+
+  I couldn't find a matching item. Try changing the description, size, or maximum price.
+
+0 model calls this session
 ```
 
-**The three tools, tested one at a time**
+The empty-search result shows that the branch stops before an outfit or fit card
+is generated.
 
-```
-$ python -c "from tools import search_listings; print(search_listings('graphic tee', max_price=30))"
+### The three tools, tested one at a time
 
+#### `search_listings`
+
+```text
+$ python -c "from tools import search_listings; print([(x['title'], x['price']) for x in search_listings('graphic tee', max_price=30)[:2]])"
+
+[('Y2K Baby Tee — Butterfly Print', 18.0), ('Graphic Tee — 2003 Tour Bootleg Style', 24.0)]
 ```
 
-```
-$ python -c "from tools import suggest_outfit; ..."
+The no-match behavior was also tested:
 
+```text
+$ python -c "from tools import search_listings; print(search_listings('designer ballgown', size='XXS', max_price=5))"
+
+[]
 ```
 
-```
-$ python -c "from tools import create_fit_card; ..."
+#### `suggest_outfit`
 
+```text
+$ python -c "from tools import suggest_outfit; from utils.data_loader import get_example_wardrobe, load_listings; print(suggest_outfit(load_listings()[1], get_example_wardrobe()))"
+
+Here are two ways to style your new Y2K butterfly baby tee using pieces from your existing wardrobe:
+
+### Outfit 1: 2000s Streetwear Contrast
+* **Top:** Y2K Baby Tee — Butterfly Print (worn over or under)
+* **Bottoms:** Baggy straight-leg jeans (dark wash)
+* **Outerwear:** Black cropped zip hoodie
+* **Shoes:** Chunky white sneakers
+* **Accessories:** Black crossbody bag
+
+**Why it works:** This leans into the authentic Y2K aesthetic by playing with proportions. The fitted, feminine butterfly tee is balanced out by the ultra-baggy dark wash jeans and the chunky white sneakers. Tossing the black cropped zip hoodie on top keeps the silhouette sharp and pulls in the black accents from the accessories.
+
+---
+
+### Outfit 2: Casual Soft-Grunge
+* **Top:** Y2K Baby Tee — Butterfly Print
+* **Bottoms:** Wide-leg khaki trousers
+* **Outerwear:** Vintage black denim jacket
+* **Shoes:** Black combat boots
+* **Accessories:** Brown leather belt, Black crossbody bag
+
+**Why it works:** This outfit mixes your cottagecore/vintage top with edgier, utilitarian pieces. The pink and purple butterfly print pops against the neutral khaki wide-leg trousers,while the vintage black denim jacket and combat boots add a grounded, grunge contrast that keeps the sweetness of the baby tee from feeling too precious.
 ```
+
+An empty wardrobe was also tested. Instead of raising an error or returning an
+empty string, the tool returned general styling advice.
+
+#### `create_fit_card`
+
+```text
+$ python -c "from tools import create_fit_card; from utils.data_loader import load_listings; print(create_fit_card('   ', load_listings()[0]))"
+
+I found Vintage Levi's 501 Jeans — Medium Wash, but I do not have an outfit suggestion to turn into a fit card yet.
+```
+
+This verifies the tool's empty-outfit behavior without causing an exception.
 
 ---
 
 ## How I Used AI
 
-<!-- Two specific moments. What you asked, what came back, what you changed.
+### Moment 1
 
-     "I used Claude to help me code" is not enough.
+- **What I asked for:** I asked my AI coding assistant to help plan the three FitFindr tools after I inspected the real listing and wardrobe fields.
+- **What came back:** The assistant proposed separate responsibilities for listing search, wardrobe-based outfit generation, and fit-card generation.
+- **What I changed:** I made the contracts more specific before implementing them. I required `search_listings` to return `[]` when nothing matches, enforced maximum-price filtering, used normalized size tokens instead of loose substring matching, made `suggest_outfit` return general advice for an empty wardrobe, and made `create_fit_card` handle an empty outfit without crashing.
 
-     "I gave Claude my search_listings spec. It returned None on no match
-     instead of an empty list, so I changed it" is the level we want. -->
+### Moment 2
 
-**Moment 1**
-
-- *What I asked for:*
-- *What came back:*
-- *What I changed:*
-
-**Moment 2**
-
-- *What I asked for:*
-- *What came back:*
-- *What I changed:*
+- **What I asked for:** I asked my AI coding assistant to help debug `agent.py` after I received an `IndentationError`.
+- **What came back:** We inspected the relevant lines and found that `parse_query()` had accidentally been placed inside `new_session()`.
+- **What I changed:** I moved `parse_query()` back to the module level, verified the file with `python -m py_compile agent.py`, and implemented the planning loop using session state, a `step` variable, and `trace.check_iterations(count)`. I then tested both the successful branch and the no-results branch before committing the implementation.
 
 <!-- ═══════════════════════ UNIT 4 — THE TEST ═══════════════════════
 
@@ -180,7 +297,7 @@ $ python -c "from tools import create_fit_card; ..."
 **Real output from one try**, pasted as text, naming the file and function
 that produced it:
 
-```
+```text
 
 ```
 
@@ -214,8 +331,6 @@ that produced it:
 
 **Diagnoses**
 
-
-
 ---
 
 ## Loop Trace
@@ -232,13 +347,13 @@ that produced it:
 
 **Happy path**
 
-```
+```text
 
 ```
 
 **Empty search**
 
-```
+```text
 
 ```
 
@@ -246,8 +361,6 @@ that produced it:
 behaved differently afterwards. If the rewire didn't work, say exactly where it
 broke — the error text and the last thing that worked. That earns the point in
 full. -->
-
-
 
 ---
 
@@ -277,8 +390,6 @@ full. -->
 <!-- If it made things worse, say that. Honestly reported, that earns full
      credit and is more interesting than one that worked. -->
 
-
-
 ---
 
 ## What's Still Broken
@@ -286,8 +397,6 @@ full. -->
 <!-- For each criterion still missed: what you'd do, and why you stopped where
      you did. "I ran out of time" is fine if it's true. Pretending nothing is
      left is not. -->
-
-
 
 <!-- ═════════════════════════════════════════════════════════════════════
 
