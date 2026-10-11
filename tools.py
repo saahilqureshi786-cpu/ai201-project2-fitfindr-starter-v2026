@@ -34,7 +34,11 @@ _STOPWORDS = {
 def _keywords(text: str) -> set[str]:
     """Return useful lowercase words for keyword matching."""
     words = re.findall(r"[a-z0-9]+", (text or "").lower())
-    return {word for word in words if word not in _STOPWORDS and len(word) > 1}
+    return {
+        word
+        for word in words
+        if word not in _STOPWORDS and len(word) > 1
+    }
 
 
 def _size_tokens(size: str) -> set[str]:
@@ -42,7 +46,11 @@ def _size_tokens(size: str) -> set[str]:
     cleaned = re.sub(r"\([^)]*\)", "", size or "")
     parts = re.split(r"[/,\s]+", cleaned.upper())
 
-    return {part.strip() for part in parts if part.strip()}
+    return {
+        part.strip()
+        for part in parts
+        if part.strip()
+    }
 
 
 def _size_matches(wanted: str, listing_size: str) -> bool:
@@ -52,6 +60,7 @@ def _size_matches(wanted: str, listing_size: str) -> bool:
     This allows M to match S/M, but prevents S from accidentally
     matching something like US 9.
     """
+
     if not wanted:
         return True
 
@@ -84,11 +93,17 @@ def search_listings(
     for listing in listings:
 
         # Maximum-price filter
-        if max_price is not None and listing["price"] > max_price:
+        if (
+            max_price is not None
+            and listing["price"] > max_price
+        ):
             continue
 
         # Size filter
-        if size is not None and not _size_matches(size, listing["size"]):
+        if (
+            size is not None
+            and not _size_matches(size, listing["size"])
+        ):
             continue
 
         searchable_text = " ".join(
@@ -96,8 +111,12 @@ def search_listings(
                 listing.get("title", ""),
                 listing.get("description", ""),
                 listing.get("category", ""),
-                " ".join(listing.get("style_tags", [])),
-                " ".join(listing.get("colors", [])),
+                " ".join(
+                    listing.get("style_tags", [])
+                ),
+                " ".join(
+                    listing.get("colors", [])
+                ),
                 listing.get("brand") or "",
                 listing.get("platform", ""),
             ]
@@ -106,40 +125,60 @@ def search_listings(
         listing_words = _keywords(searchable_text)
 
         # Count how many query keywords appear in this listing.
-        score = len(query_words & listing_words)
+        score = len(
+            query_words & listing_words
+        )
 
         # Do not return unrelated listings.
         if score == 0:
             continue
 
-        scored.append((score, listing))
+        scored.append(
+            (score, listing)
+        )
 
     # Highest-scoring listings first.
-    scored.sort(key=lambda pair: pair[0], reverse=True)
+    scored.sort(
+        key=lambda pair: pair[0],
+        reverse=True,
+    )
 
     return [
         listing
-        for _, listing in scored[: config.SEARCH_RESULT_LIMIT]
+        for _, listing in scored[
+            : config.SEARCH_RESULT_LIMIT
+        ]
     ]
 
 
 # ── Tool 2: suggest_outfit ────────────────────────────────────────────────────
 
-def suggest_outfit(new_item: dict, wardrobe: dict) -> str:
+def suggest_outfit(
+    new_item: dict,
+    wardrobe: dict,
+) -> str:
     """
     Suggest one or two outfits using the thrifted item and the user's wardrobe.
 
     If the wardrobe is empty, return general styling advice instead.
     """
 
-    items = wardrobe.get("items", [])
+    items = wardrobe.get(
+        "items",
+        [],
+    )
 
     item_details = (
-        f"Item: {new_item.get('title', 'Unknown item')}\n"
-        f"Category: {new_item.get('category', '')}\n"
-        f"Colors: {', '.join(new_item.get('colors', []))}\n"
-        f"Style tags: {', '.join(new_item.get('style_tags', []))}\n"
-        f"Price: ${new_item.get('price', 0):.2f}\n"
+        f"Item: "
+        f"{new_item.get('title', 'Unknown item')}\n"
+        f"Category: "
+        f"{new_item.get('category', '')}\n"
+        f"Colors: "
+        f"{', '.join(new_item.get('colors', []))}\n"
+        f"Style tags: "
+        f"{', '.join(new_item.get('style_tags', []))}\n"
+        f"Price: "
+        f"${new_item.get('price', 0):.2f}\n"
     )
 
     if not items:
@@ -161,9 +200,12 @@ Keep the answer concise and useful.
     wardrobe_text = "\n".join(
         (
             f"- {item.get('name', 'Unnamed item')} "
-            f"| category: {item.get('category', '')} "
-            f"| colors: {', '.join(item.get('colors', []))} "
-            f"| style: {', '.join(item.get('style_tags', []))}"
+            f"| category: "
+            f"{item.get('category', '')} "
+            f"| colors: "
+            f"{', '.join(item.get('colors', []))} "
+            f"| style: "
+            f"{', '.join(item.get('style_tags', []))}"
         )
         for item in items
     )
@@ -189,7 +231,10 @@ Keep the answer concise and practical.
 
 # ── Tool 3: create_fit_card ───────────────────────────────────────────────────
 
-def create_fit_card(outfit: str, new_item: dict) -> str:
+def create_fit_card(
+    outfit: str,
+    new_item: dict,
+) -> str:
     """
     Create a short social-style caption about the thrift find.
 
@@ -200,30 +245,48 @@ def create_fit_card(outfit: str, new_item: dict) -> str:
 
     if not outfit or not outfit.strip():
         return (
-            f"I found {new_item.get('title', 'this thrifted item')}, "
-            "but I do not have an outfit suggestion to turn into a fit card yet."
+            f"I found "
+            f"{new_item.get('title', 'this thrifted item')}, "
+            "but I do not have an outfit suggestion "
+            "to turn into a fit card yet."
         )
 
-    title = new_item.get("title", "this thrift find")
-    price = new_item.get("price", 0)
-    platform = new_item.get("platform", "the resale platform")
+    title = new_item.get(
+        "title",
+        "this thrift find",
+    )
+
+    price = new_item.get(
+        "price",
+        0,
+    )
+
+    platform = new_item.get(
+        "platform",
+        "the resale platform",
+    )
+
+    exact_price = f"${price:.2f}"
 
     prompt = f"""
 Write a short social-media-style caption someone would actually post about
 this thrift find.
 
-Item: {title}
-Price: ${price:.2f}
-Platform: {platform}
+The following listing details must be preserved exactly:
+
+Exact item title: {title}
+Exact price: {exact_price}
+Exact platform: {platform}
 
 Outfit suggestion:
 {outfit}
 
 Requirements:
 - Write 2 to 4 sentences.
-- Mention the item.
-- Mention the price exactly once.
-- Mention the platform exactly once.
+- Include the exact item title "{title}" exactly as written.
+- Include the exact price "{exact_price}" exactly once.
+- Include the exact platform "{platform}" exactly once.
+- Do not shorten, paraphrase, rename, or reformat those three listing details.
 - Describe the vibe of the outfit.
 - Make it sound like a real personal post, not a product listing.
 """
