@@ -1,16 +1,10 @@
 """
 The FitFindr planning loop.
 
-Unit 4 moves search_listings behind MCP. The other two tools remain direct
-Python calls.
-
-The agent:
-1. Parses the user's query.
-2. Searches listings through MCP.
-3. Stops early if nothing matches.
-4. Stores the selected item in session state.
-5. Generates an outfit suggestion.
-6. Generates a fit card.
+Unit 4:
+- search_listings runs through MCP
+- every tool call is traceable
+- model failures return an actionable user message
 """
 
 import re
@@ -81,7 +75,6 @@ def run_agent(query: str, wardrobe: dict) -> dict:
     """Run the FitFindr planning loop and return the finished session."""
 
     session = new_session(query, wardrobe)
-
     session["parsed"] = parse_query(query)
 
     step = "search"
@@ -94,39 +87,111 @@ def run_agent(query: str, wardrobe: dict) -> dict:
         if step == "search":
             parsed = session["parsed"]
 
-            # Unit 4: search_listings now runs through MCP.
+            search_inputs = {
+                "description": parsed["description"],
+                "size": parsed["size"],
+                "max_price": parsed["max_price"],
+            }
+
             session["search_results"] = call_tool(
                 "search_listings",
-                {
-                    "description": parsed["description"],
-                    "size": parsed["size"],
-                    "max_price": parsed["max_price"],
-                },
+                search_inputs,
             )
 
-            # Branch: stop if the search returned nothing.
             if not session["search_results"]:
+                trace.step(
+                    "search_listings (via MCP)",
+                    inputs=search_inputs,
+                    returned=session["search_results"],
+                    note="branch: no matches, stopping before suggest_outfit",
+                )
+
                 session["error"] = (
                     "I couldn't find a matching item. "
                     "Try changing the description, size, or maximum price."
                 )
                 return session
 
+            trace.step(
+                "search_listings (via MCP)",
+                inputs=search_inputs,
+                returned=session["search_results"],
+                note="matches found; selecting the first result",
+            )
+
             session["selected_item"] = session["search_results"][0]
             step = "outfit"
 
         elif step == "outfit":
-            session["outfit_suggestion"] = suggest_outfit(
-                session["selected_item"],
-                session["wardrobe"],
+            outfit_inputs = {
+                "new_item": session["selected_item"],
+                "wardrobe_items": len(
+                    session["wardrobe"].get("items", [])
+                ),
+            }
+
+            try:
+                session["outfit_suggestion"] = suggest_outfit(
+                    session["selected_item"],
+                    session["wardrobe"],
+                )
+
+            except ModelUnavailable as exc:
+                trace.step(
+                    "suggest_outfit",
+                    inputs=outfit_inputs,
+                    returned="ModelUnavailable",
+                    note=str(exc),
+                )
+
+                session["error"] = (
+                    "The AI model couldn't be reached, so I couldn't create "
+                    "an outfit suggestion. Check your API key or internet "
+                    "connection, then try again."
+                )
+                return session
+
+            trace.step(
+                "suggest_outfit",
+                inputs=outfit_inputs,
+                returned=session["outfit_suggestion"],
             )
+
             step = "fit_card"
 
         elif step == "fit_card":
-            session["fit_card"] = create_fit_card(
-                session["outfit_suggestion"],
-                session["selected_item"],
+            fit_card_inputs = {
+                "outfit": session["outfit_suggestion"],
+                "new_item": session["selected_item"],
+            }
+
+            try:
+                session["fit_card"] = create_fit_card(
+                    session["outfit_suggestion"],
+                    session["selected_item"],
+                )
+
+            except ModelUnavailable as exc:
+                trace.step(
+                    "create_fit_card",
+                    inputs=fit_card_inputs,
+                    returned="ModelUnavailable",
+                    note=str(exc),
+                )
+
+                session["error"] = (
+                    "The AI model couldn't be reached while creating the "
+                    "fit card. Check your API key or internet connection, "
+                    "then try again."
+                )
+                return session
+
+            trace.step(
+                "create_fit_card",
+                inputs=fit_card_inputs,
+                returned=session["fit_card"],
             )
+
             return session
 
 
@@ -135,10 +200,6 @@ def run_agent(query: str, wardrobe: dict) -> dict:
 def _show(session: dict) -> None:
     if session["error"]:
         print(f"  stopped: {session['error']}")
-        print(
-            f"  fit_card is {session['fit_card']!r} "
-            "— it should still be None here"
-        )
         return
 
     item = session["selected_item"] or {}
@@ -147,6 +208,7 @@ def _show(session: dict) -> None:
         f"  found:    {item.get('title')} — "
         f"${item.get('price')} on {item.get('platform')}"
     )
+
     print(f"  outfit:   {session['outfit_suggestion']}")
     print(f"  fit card: {session['fit_card']}")
 
@@ -168,10 +230,4 @@ if __name__ == "__main__":
             query="designer ballgown size XXS under $5",
             wardrobe=get_example_wardrobe(),
         )
-    )
-
-    print(
-        "\nThe second one should stop before the fit card. "
-        "If both paths look the same,\n"
-        "the branch isn't doing anything yet."
     )
