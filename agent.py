@@ -1,22 +1,24 @@
 """
 The FitFindr planning loop.
 
-This is the file that makes FitFindr an agent rather than a script. It decides
-which tool to run next based on what the last one returned.
+Unit 4 moves search_listings behind MCP. The other two tools remain direct
+Python calls.
 
-If your loop calls all three tools no matter what comes back, you have a list
-of function calls. A loop looks at the last result before it picks the next
-step. **That branch is the graded part of this unit.**
-
-Build and test your three tools in `tools.py` first. Then come here.
-
-    python agent.py          runs both example paths below
+The agent:
+1. Parses the user's query.
+2. Searches listings through MCP.
+3. Stops early if nothing matches.
+4. Stores the selected item in session state.
+5. Generates an outfit suggestion.
+6. Generates a fit card.
 """
+
 import re
-import config
+
 import trace
-from tools import search_listings, suggest_outfit, create_fit_card
 from generate import ModelUnavailable
+from mcp_client import call_tool
+from tools import suggest_outfit, create_fit_card
 
 
 # ── session state ─────────────────────────────────────────────────────────────
@@ -73,8 +75,6 @@ def parse_query(query: str) -> dict:
     }
 
 
-
-# ── planning loop ─────────────────────────────────────────────────────────────
 # ── planning loop ─────────────────────────────────────────────────────────────
 
 def run_agent(query: str, wardrobe: dict) -> dict:
@@ -82,7 +82,6 @@ def run_agent(query: str, wardrobe: dict) -> dict:
 
     session = new_session(query, wardrobe)
 
-    # Parse the user's query and store it in session state.
     session["parsed"] = parse_query(query)
 
     step = "search"
@@ -95,10 +94,14 @@ def run_agent(query: str, wardrobe: dict) -> dict:
         if step == "search":
             parsed = session["parsed"]
 
-            session["search_results"] = search_listings(
-                parsed["description"],
-                parsed["size"],
-                parsed["max_price"],
+            # Unit 4: search_listings now runs through MCP.
+            session["search_results"] = call_tool(
+                "search_listings",
+                {
+                    "description": parsed["description"],
+                    "size": parsed["size"],
+                    "max_price": parsed["max_price"],
+                },
             )
 
             # Branch: stop if the search returned nothing.
@@ -125,16 +128,25 @@ def run_agent(query: str, wardrobe: dict) -> dict:
                 session["selected_item"],
             )
             return session
+
+
 # ── running it directly ───────────────────────────────────────────────────────
 
 def _show(session: dict) -> None:
     if session["error"]:
         print(f"  stopped: {session['error']}")
-        print(f"  fit_card is {session['fit_card']!r} — it should still be None here")
+        print(
+            f"  fit_card is {session['fit_card']!r} "
+            "— it should still be None here"
+        )
         return
 
     item = session["selected_item"] or {}
-    print(f"  found:    {item.get('title')} — ${item.get('price')} on {item.get('platform')}")
+
+    print(
+        f"  found:    {item.get('title')} — "
+        f"${item.get('price')} on {item.get('platform')}"
+    )
     print(f"  outfit:   {session['outfit_suggestion']}")
     print(f"  fit card: {session['fit_card']}")
 
@@ -143,18 +155,23 @@ if __name__ == "__main__":
     from utils.data_loader import get_example_wardrobe
 
     print("=== A query the data can match ===")
-    _show(run_agent(
-        query="looking for a vintage graphic tee under $30",
-        wardrobe=get_example_wardrobe(),
-    ))
+    _show(
+        run_agent(
+            query="looking for a vintage graphic tee under $30",
+            wardrobe=get_example_wardrobe(),
+        )
+    )
 
     print("\n=== A query it can't ===")
-    _show(run_agent(
-        query="designer ballgown size XXS under $5",
-        wardrobe=get_example_wardrobe(),
-    ))
+    _show(
+        run_agent(
+            query="designer ballgown size XXS under $5",
+            wardrobe=get_example_wardrobe(),
+        )
+    )
 
     print(
-        "\nThe second one should stop before the fit card. If both paths look "
-        "the same,\nthe branch isn't doing anything yet."
+        "\nThe second one should stop before the fit card. "
+        "If both paths look the same,\n"
+        "the branch isn't doing anything yet."
     )
