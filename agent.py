@@ -3,6 +3,7 @@ The FitFindr planning loop.
 
 Unit 4:
 - search_listings runs through MCP
+- create_fit_card also runs through MCP as a stretch feature
 - every tool call is traceable
 - model failures return an actionable user message
 - an empty size-constrained search retries once without the size filter
@@ -12,8 +13,8 @@ import re
 
 import trace
 from generate import ModelUnavailable
-from mcp_client import call_tool
-from tools import suggest_outfit, create_fit_card
+from mcp_client import call_tool, MCPError
+from tools import suggest_outfit
 
 
 # ── session state ─────────────────────────────────────────────────────────────
@@ -51,8 +52,17 @@ def parse_query(query: str) -> dict:
         re.IGNORECASE,
     )
 
-    max_price = float(price_match.group(1)) if price_match else None
-    size = size_match.group(1) if size_match else None
+    max_price = (
+        float(price_match.group(1))
+        if price_match
+        else None
+    )
+
+    size = (
+        size_match.group(1)
+        if size_match
+        else None
+    )
 
     description = text
 
@@ -100,6 +110,8 @@ def run_agent(query: str, wardrobe: dict) -> dict:
         count += 1
         trace.check_iterations(count)
 
+        # ── search ────────────────────────────────────────────────────────────
+
         if step == "search":
             parsed = session["parsed"]
 
@@ -109,14 +121,29 @@ def run_agent(query: str, wardrobe: dict) -> dict:
                 "max_price": parsed["max_price"],
             }
 
-            session["search_results"] = call_tool(
-                "search_listings",
-                search_inputs,
-            )
+            try:
+                session["search_results"] = call_tool(
+                    "search_listings",
+                    search_inputs,
+                )
+
+            except MCPError as exc:
+                trace.step(
+                    "search_listings (via MCP)",
+                    inputs=search_inputs,
+                    returned="MCPError",
+                    note=str(exc),
+                )
+
+                session["error"] = (
+                    "The listing search service could not be reached. "
+                    "Try again in a moment."
+                )
+
+                return session
 
             # Stretch feature:
-            # If a size-constrained search returns nothing,
-            # retry once without the size filter.
+            # Retry one time without the size filter.
             if (
                 not session["search_results"]
                 and parsed["size"] is not None
@@ -139,10 +166,26 @@ def run_agent(query: str, wardrobe: dict) -> dict:
                     "max_price": parsed["max_price"],
                 }
 
-                session["search_results"] = call_tool(
-                    "search_listings",
-                    retry_inputs,
-                )
+                try:
+                    session["search_results"] = call_tool(
+                        "search_listings",
+                        retry_inputs,
+                    )
+
+                except MCPError as exc:
+                    trace.step(
+                        "search_listings retry (via MCP)",
+                        inputs=retry_inputs,
+                        returned="MCPError",
+                        note=str(exc),
+                    )
+
+                    session["error"] = (
+                        "The listing search service could not be reached "
+                        "during the retry. Try again in a moment."
+                    )
+
+                    return session
 
                 session["notice"] = (
                     f"No matches were found in size {dropped_size}, "
@@ -161,11 +204,12 @@ def run_agent(query: str, wardrobe: dict) -> dict:
                 if not session["search_results"]:
                     session["error"] = (
                         "I couldn't find a matching item. "
-                        f"I retried without the size filter "
+                        "I retried without the size filter "
                         f"(dropped size {dropped_size}) and still "
                         "found nothing. Try changing the description "
                         "or maximum price."
                     )
+
                     return session
 
                 session["selected_item"] = (
@@ -175,8 +219,7 @@ def run_agent(query: str, wardrobe: dict) -> dict:
                 step = "outfit"
                 continue
 
-            # Standard empty-search branch when there was
-            # no size constraint to loosen.
+            # Normal empty-search branch.
             if not session["search_results"]:
                 trace.step(
                     "search_listings (via MCP)",
@@ -193,6 +236,7 @@ def run_agent(query: str, wardrobe: dict) -> dict:
                     "Try changing the description, size, "
                     "or maximum price."
                 )
+
                 return session
 
             trace.step(
@@ -209,6 +253,8 @@ def run_agent(query: str, wardrobe: dict) -> dict:
             )
 
             step = "outfit"
+
+        # ── outfit ────────────────────────────────────────────────────────────
 
         elif step == "outfit":
             outfit_inputs = {
@@ -241,6 +287,7 @@ def run_agent(query: str, wardrobe: dict) -> dict:
                     "Check your API key or internet connection, "
                     "then try again."
                 )
+
                 return session
 
             trace.step(
@@ -251,6 +298,8 @@ def run_agent(query: str, wardrobe: dict) -> dict:
 
             step = "fit_card"
 
+        # ── fit card ──────────────────────────────────────────────────────────
+
         elif step == "fit_card":
             fit_card_inputs = {
                 "outfit": session["outfit_suggestion"],
@@ -258,28 +307,28 @@ def run_agent(query: str, wardrobe: dict) -> dict:
             }
 
             try:
-                session["fit_card"] = create_fit_card(
-                    session["outfit_suggestion"],
-                    session["selected_item"],
+                session["fit_card"] = call_tool(
+                    "create_fit_card",
+                    fit_card_inputs,
                 )
 
-            except ModelUnavailable as exc:
+            except MCPError as exc:
                 trace.step(
-                    "create_fit_card",
+                    "create_fit_card (via MCP)",
                     inputs=fit_card_inputs,
-                    returned="ModelUnavailable",
+                    returned="MCPError",
                     note=str(exc),
                 )
 
                 session["error"] = (
-                    "The AI model couldn't be reached while "
-                    "creating the fit card. Check your API key "
-                    "or internet connection, then try again."
+                    "The fit-card service could not complete the request. "
+                    "Check the model connection and try again."
                 )
+
                 return session
 
             trace.step(
-                "create_fit_card",
+                "create_fit_card (via MCP)",
                 inputs=fit_card_inputs,
                 returned=session["fit_card"],
             )
@@ -290,17 +339,25 @@ def run_agent(query: str, wardrobe: dict) -> dict:
 # ── running it directly ───────────────────────────────────────────────────────
 
 def _show(session: dict) -> None:
+    """Print one completed session."""
+
     if session["notice"]:
-        print(f"  note: {session['notice']}")
+        print(
+            f"  note: {session['notice']}"
+        )
 
     if session["error"]:
-        print(f"  stopped: {session['error']}")
+        print(
+            f"  stopped: {session['error']}"
+        )
+
         return
 
     item = session["selected_item"] or {}
 
     print(
-        f"  found:    {item.get('title')} — "
+        f"  found:    "
+        f"{item.get('title')} — "
         f"${item.get('price')} on "
         f"{item.get('platform')}"
     )
@@ -319,7 +376,9 @@ def _show(session: dict) -> None:
 if __name__ == "__main__":
     from utils.data_loader import get_example_wardrobe
 
-    print("=== A query the data can match ===")
+    print(
+        "=== A query the data can match ==="
+    )
 
     _show(
         run_agent(
@@ -331,7 +390,9 @@ if __name__ == "__main__":
         )
     )
 
-    print("\n=== A query it can't ===")
+    print(
+        "\n=== A query it can't ==="
+    )
 
     _show(
         run_agent(
