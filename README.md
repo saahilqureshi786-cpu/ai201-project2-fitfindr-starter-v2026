@@ -1,56 +1,38 @@
 # FitFindr
 
-> ### 👋 Start here
->
-> **New to this repo? Read [RUNNING.md](RUNNING.md) first** — setup, every
-> command, and what to do when something breaks.
->
-> Once `python test.py` passes:
->
-> ```bash
-> python app.py listings --full -n 6      # read the data (Milestone 1)
-> python app.py fields                    # what you can filter on
-> python app.py ask 'vintage graphic tee under $30'
-> ```
->
-> The Unit 3 tools and planning loop are now implemented.
->
-> **The rest of this file is the submission.**
+FitFindr is an AI thrift-shopping assistant that searches secondhand clothing
+listings, selects a relevant item, combines it with pieces from a user's
+wardrobe, and generates a short social-style fit card.
+
+> **Setup and commands:** See [RUNNING.md](RUNNING.md).
 
 ---
 
-<!-- ─────────────────────────────────────────────────────────────────────────
-     HOW TO USE THIS FILE
-
-     This is your submission. Fill each section in as you finish the milestone
-     it belongs to — don't leave it all to the end.
-
-     Unit 3 asks for the first five sections. Unit 4 adds the five below them.
-     Leave the unit 4 sections alone until then; they're here so you know
-     what's coming.
-
-     Everything is pasted as TEXT. No screenshots, no images, no video links.
-     A typed block of output gets full credit; a picture of the same output
-     gets none.
-     ───────────────────────────────────────────────────────────────────────── -->
-
-<!-- ═══════════════════════ UNIT 3 — THE BUILD ═══════════════════════ -->
+# Unit 3 — Build
 
 ## What This Does
 
-FitFindr is a thrift-shopping assistant that accepts a clothing request written
-in plain language, such as `vintage graphic tee under $30`.
+A user can ask FitFindr for something in plain language, for example:
 
-The agent parses the request into a description, optional size, and optional
-maximum price. It searches the available thrift listings, chooses the strongest
-matching item, and combines that item with pieces from the user's existing
-wardrobe to suggest one or two outfits.
+```text
+vintage graphic tee under $30
+```
 
-Finally, FitFindr creates a short social-style fit card that includes the
-selected item, its price, resale platform, and the overall outfit vibe.
+FitFindr:
 
-If no listing matches the request, the agent stops before outfit generation and
-tells the user to change the description, size, or maximum price.
+1. Parses the request into a description, optional size, and optional maximum
+   price.
+2. Searches thrift listings.
+3. Selects the strongest matching result.
+4. Suggests one or two outfits using the selected item and the user's wardrobe.
+5. Creates a short fit-card caption.
+
+If the search cannot find anything, the agent stops before outfit generation
+and returns an actionable message instead of sending bad data into the model.
+
+During Unit 4, the search behavior was extended so that a failed
+size-constrained search retries once without the size filter and explicitly
+tells the user what constraint was dropped.
 
 ---
 
@@ -58,64 +40,126 @@ tells the user to change the description, size, or maximum price.
 
 ### `search_listings`
 
-- **What it does:** Searches clothing listings using description keywords and optional size and maximum-price filters.
-- **Inputs:** `description` (`str`), `size` (`str` or `None`), `max_price` (`float` or `None`).
-- **Returns:** A list of matching listing dictionaries containing fields such as `id`, `title`, `description`, `category`, `style_tags`, `size`, `condition`, `price`, `colors`, `brand`, and `platform`, with stronger keyword matches first.
-- **Empty case:** Returns an empty list `[]` when no listings match.
+**Purpose:** Search thrift listings using clothing keywords and optional
+constraints.
+
+**Inputs:**
+
+- `description: str`
+- `size: str | None`
+- `max_price: float | None`
+
+**Returns:**
+
+```python
+list[dict]
+```
+
+Each dictionary contains listing information such as title, category, size,
+price, colors, style tags, brand, and resale platform.
+
+**Empty case:** Returns:
+
+```python
+[]
+```
+
+when nothing matches.
+
+**Unit 4 MCP status:** This tool is exposed by `mcp_server.py` and called by the
+agent through:
+
+```python
+mcp_client.call_tool("search_listings", ...)
+```
+
+---
 
 ### `suggest_outfit`
 
-- **What it does:** Suggests one or two outfits combining the selected thrift item with pieces from the user's existing wardrobe.
-- **Inputs:** `new_item` (`dict`), `wardrobe` (`dict` containing an `items` list).
-- **Returns:** A non-empty string containing one or two outfit suggestions and short explanations of why the pieces work together.
-- **Empty case:** If the wardrobe has no items, returns general styling advice instead of failing or returning an empty string.
+**Purpose:** Generate one or two outfit suggestions around the selected thrift
+item.
+
+**Inputs:**
+
+- `new_item: dict`
+- `wardrobe: dict`
+
+**Returns:**
+
+```python
+str
+```
+
+The string contains outfit suggestions and short explanations.
+
+**Empty case:** If the user has no wardrobe items, the tool returns general
+styling advice instead of failing.
+
+This tool remains a local Python tool.
+
+---
 
 ### `create_fit_card`
 
-- **What it does:** Creates a short social-media-style caption about the selected thrift find and outfit.
-- **Inputs:** `outfit` (`str`), `new_item` (`dict`).
-- **Returns:** A 2–4 sentence caption that mentions the item, price, platform, and overall outfit vibe.
-- **Empty case:** If `outfit` is empty or whitespace, returns a descriptive message instead of raising an exception.
+**Purpose:** Generate a short social-media-style caption for the selected item
+and outfit.
+
+**Inputs:**
+
+- `outfit: str`
+- `new_item: dict`
+
+**Returns:**
+
+```python
+str
+```
+
+The current prompt requires the exact selected listing title, exact two-decimal
+price, and exact platform to appear in the generated caption.
+
+**Empty case:** If the outfit is empty or whitespace, the implementation
+returns a descriptive fallback message.
+
+**Unit 4 stretch MCP status:** This became the second FitFindr tool exposed by
+`mcp_server.py` and is called through:
+
+```python
+mcp_client.call_tool("create_fit_card", ...)
+```
 
 ---
 
 ## Planning Loop
 
-**Branch rule:** If `search_listings` returns an empty list, store a helpful
-message in `session["error"]` and immediately stop. Do not call
-`suggest_outfit` or `create_fit_card`. Otherwise, choose the first search
-result, save it in `session["selected_item"]`, generate an outfit, generate a
-fit card, and return the completed session.
+The planning loop lives in:
 
-**Where it lives:** `agent.py::run_agent`
+```text
+agent.py::run_agent
+```
 
-**How the query is parsed:** The query is parsed with regular expressions in
-`parse_query()`. It looks for a maximum price after phrases such as `under`,
-`below`, or `up to`, and looks for a size after the word `size`. Those parts are
-removed from the query and the remaining text becomes the search description.
+The query parser lives in:
+
+```text
+agent.py::parse_query
+```
 
 For example:
 
 ```text
-vintage graphic tee size M under $30
+90s track jacket size M under $50
 ```
 
-becomes approximately:
+is parsed approximately as:
 
 ```python
 {
-    "description": "vintage graphic tee",
+    "description": "90s track jacket",
     "size": "M",
-    "max_price": 30.0
+    "max_price": 50.0,
 }
 ```
-
-**What moves through the session:** The session starts with the original query
-and wardrobe. The parsed query is stored in `session["parsed"]`, search results
-go into `session["search_results"]`, the first result is stored in
-`session["selected_item"]`, the generated outfit goes into
-`session["outfit_suggestion"]`, and the final caption goes into
-`session["fit_card"]`.
 
 The main state flow is:
 
@@ -133,77 +177,83 @@ outfit_suggestion
 fit_card
 ```
 
-The loop also increments an iteration counter and calls:
+### Current branch rule
+
+The normal path is:
+
+```text
+search
+  ↓
+matches?
+  ├── yes → select first result
+  │         ↓
+  │      suggest_outfit
+  │         ↓
+  │      create_fit_card
+  │         ↓
+  │        return
+  │
+  └── no
+       ↓
+     was a size supplied?
+       ├── yes → retry search once without size
+       │          ├── matches → continue normal path
+       │          └── empty → stop with helpful error
+       │
+       └── no → stop with helpful error
+```
+
+The agent stores all intermediate values in session state, including:
+
+```python
+session["parsed"]
+session["search_results"]
+session["selected_item"]
+session["outfit_suggestion"]
+session["fit_card"]
+session["error"]
+session["notice"]
+```
+
+The loop also calls:
 
 ```python
 trace.check_iterations(count)
 ```
 
-on every iteration so the agent cannot continue indefinitely if a branch fails
-to terminate.
+so an unexpected branch cannot run indefinitely.
 
 ---
 
 ## Sample Run
 
-### One full query
+Current full-agent trace:
 
 ```text
-$ python app.py ask 'vintage graphic tee under $30'
+$ python app.py ask 'vintage graphic tee under $30' --trace
 
-  Found:    Y2K Baby Tee — Butterfly Print — $18.0 on depop
+[1] search_listings (via MCP)
+      in:  dict with keys: description, size, max_price
+      out: 3 items: Graphic Tee — 2003 Tour Bootleg Style, Vintage Band Tee — Faded Grey, Y2K Baby Tee — Butterfly Print
+      →    matches found; selecting the first result
 
-  Outfit:   Here are two ways to style your new Y2K butterfly baby tee using pieces from your existing wardrobe:
+[2] suggest_outfit
+      in:  dict with keys: new_item, wardrobe_items
+      out: Here are two outfit options using your 2003 tour graphic tee and items from your wardrobe: ...
 
-### Outfit 1: 2000s Streetwear Contrast
-* **Top:** Y2K Baby Tee — Butterfly Print (worn over or under)
-* **Bottoms:** Baggy straight-leg jeans (dark wash)
-* **Outerwear:** Black cropped zip hoodie
-* **Shoes:** Chunky white sneakers
-* **Accessories:** Black crossbody bag
+[3] create_fit_card (via MCP)
+      in:  dict with keys: outfit, new_item
+      out: I can't believe I scored this Graphic Tee — 2003 Tour Bootleg Style for only $24.00 on depop! ...
 
-**Why it works:** This leans into the authentic Y2K aesthetic by playing with proportions. The fitted, feminine butterfly tee is balanced out by the ultra-baggy dark wash jeans and the chunky white sneakers. Tossing the black cropped zip hoodie on top keeps the silhouette sharp and pulls in the black accents from the accessories.
+Found: Graphic Tee — 2003 Tour Bootleg Style — $24.0 on depop
 
----
-
-### Outfit 2: Casual Soft-Grunge
-* **Top:** Y2K Baby Tee — Butterfly Print
-* **Bottoms:** Wide-leg khaki trousers
-* **Outerwear:** Vintage black denim jacket
-* **Shoes:** Black combat boots
-* **Accessories:** Brown leather belt, Black crossbody bag
-
-**Why it works:** This outfit mixes your cottagecore/vintage top with edgier, utilitarian pieces. The pink and purple butterfly print pops against the neutral khaki wide-leg trousers,while the vintage black denim jacket and combat boots add a grounded, grunge contrast that keeps the sweetness of the baby tee from feeling too precious.
-
-  Fit card: Found my ultimate Y2K aesthetic with this butterfly baby tee for only $18.00 onDepop. I paired it with baggy jeans and a cropped hoodie for that perfect 2000s streetwear contrast. Honestly obsessed with how easy this piece is to style!
-
-0 model calls this session, 2 served from cache
+Fit card: I can't believe I scored this Graphic Tee — 2003 Tour Bootleg Style
+for only $24.00 on depop! I threw it on with some baggy denim and combat boots
+for an effortless grunge streetwear vibe that feels straight out of the early
+2000s.
 ```
 
-### Empty-search branch
-
-```text
-$ python app.py ask 'designer ballgown size XXS under $5'
-
-  I couldn't find a matching item. Try changing the description, size, or maximum price.
-
-0 model calls this session
-```
-
-The empty-search result shows that the branch stops before an outfit or fit card
-is generated.
-
-### The three tools, tested one at a time
-
-#### `search_listings`
-
-```text
-$ python -c "from tools import search_listings; print([(x['title'], x['price']) for x in search_listings('graphic tee', max_price=30)[:2]])"
-
-[('Y2K Baby Tee — Butterfly Print', 18.0), ('Graphic Tee — 2003 Tour Bootleg Style', 24.0)]
-```
-
-The no-match behavior was also tested:
+### Tool test — `search_listings`
 
 ```text
 $ python -c "from tools import search_listings; print(search_listings('designer ballgown', size='XXS', max_price=5))"
@@ -211,237 +261,815 @@ $ python -c "from tools import search_listings; print(search_listings('designer 
 []
 ```
 
-#### `suggest_outfit`
+This verifies the empty-search return shape.
+
+### Tool test — `suggest_outfit`
+
+`suggest_outfit` was tested with the example wardrobe and returned non-empty
+outfit suggestions using specific wardrobe pieces.
+
+It was also tested with:
 
 ```text
-$ python -c "from tools import suggest_outfit; from utils.data_loader import get_example_wardrobe, load_listings; print(suggest_outfit(load_listings()[1], get_example_wardrobe()))"
-
-Here are two ways to style your new Y2K butterfly baby tee using pieces from your existing wardrobe:
-
-### Outfit 1: 2000s Streetwear Contrast
-* **Top:** Y2K Baby Tee — Butterfly Print (worn over or under)
-* **Bottoms:** Baggy straight-leg jeans (dark wash)
-* **Outerwear:** Black cropped zip hoodie
-* **Shoes:** Chunky white sneakers
-* **Accessories:** Black crossbody bag
-
-**Why it works:** This leans into the authentic Y2K aesthetic by playing with proportions. The fitted, feminine butterfly tee is balanced out by the ultra-baggy dark wash jeans and the chunky white sneakers. Tossing the black cropped zip hoodie on top keeps the silhouette sharp and pulls in the black accents from the accessories.
-
----
-
-### Outfit 2: Casual Soft-Grunge
-* **Top:** Y2K Baby Tee — Butterfly Print
-* **Bottoms:** Wide-leg khaki trousers
-* **Outerwear:** Vintage black denim jacket
-* **Shoes:** Black combat boots
-* **Accessories:** Brown leather belt, Black crossbody bag
-
-**Why it works:** This outfit mixes your cottagecore/vintage top with edgier, utilitarian pieces. The pink and purple butterfly print pops against the neutral khaki wide-leg trousers,while the vintage black denim jacket and combat boots add a grounded, grunge contrast that keeps the sweetness of the baby tee from feeling too precious.
+python app.py ask 'denim jacket under $50' --empty-wardrobe
 ```
 
-An empty wardrobe was also tested. Instead of raising an error or returning an
-empty string, the tool returned general styling advice.
+and returned general styling advice rather than crashing.
 
-#### `create_fit_card`
+### Tool test — `create_fit_card`
+
+The empty-outfit behavior was tested directly:
 
 ```text
 $ python -c "from tools import create_fit_card; from utils.data_loader import load_listings; print(create_fit_card('   ', load_listings()[0]))"
 
-I found Vintage Levi's 501 Jeans — Medium Wash, but I do not have an outfit suggestion to turn into a fit card yet.
+I found Vintage Levi's 501 Jeans — Medium Wash, but I do not have an outfit
+suggestion to turn into a fit card yet.
 ```
-
-This verifies the tool's empty-outfit behavior without causing an exception.
 
 ---
 
 ## How I Used AI
 
-### Moment 1
+### Moment 1 — planning the tools
 
-- **What I asked for:** I asked my AI coding assistant to help plan the three FitFindr tools after I inspected the real listing and wardrobe fields.
-- **What came back:** The assistant proposed separate responsibilities for listing search, wardrobe-based outfit generation, and fit-card generation.
-- **What I changed:** I made the contracts more specific before implementing them. I required `search_listings` to return `[]` when nothing matches, enforced maximum-price filtering, used normalized size tokens instead of loose substring matching, made `suggest_outfit` return general advice for an empty wardrobe, and made `create_fit_card` handle an empty outfit without crashing.
+I used an AI coding assistant to help reason about how to split FitFindr into
+three separate tools after examining the listing and wardrobe data.
 
-### Moment 2
+The assistant suggested separate search, styling, and fit-card responsibilities.
 
-- **What I asked for:** I asked my AI coding assistant to help debug `agent.py` after I received an `IndentationError`.
-- **What came back:** We inspected the relevant lines and found that `parse_query()` had accidentally been placed inside `new_session()`.
-- **What I changed:** I moved `parse_query()` back to the module level, verified the file with `python -m py_compile agent.py`, and implemented the planning loop using session state, a `step` variable, and `trace.check_iterations(count)`. I then tested both the successful branch and the no-results branch before committing the implementation.
+I made the contracts more specific by requiring:
+
+- an explicit `[]` empty result from search,
+- deterministic maximum-price filtering,
+- normalized size handling,
+- a useful empty-wardrobe path,
+- and a non-crashing empty-outfit path.
+
+### Moment 2 — debugging the planning loop
+
+I used an AI coding assistant while debugging an `IndentationError` in
+`agent.py`.
+
+The problem was that `parse_query()` had accidentally been placed inside
+`new_session()`.
+
+I corrected the function structure, verified the file with:
+
+```text
+python -m py_compile agent.py
+```
+
+and then tested both the successful and empty-search branches before committing
+the implementation.
+
+---
+
+# Unit 4 — Testing
 
 ## Unit 4 Stretch Features — Declared Before Build
 
-For Unit 4, I plan to attempt all three stretch features:
+Before implementing the stretch work, I declared that I would attempt all three
+Unit 4 stretch features:
 
-1. **Second tool moved onto MCP:** After the required `search_listings` MCP
-   migration is working, I will also expose a second FitFindr tool through MCP
-   and show a run that uses that MCP path.
+1. **Second tool moved onto MCP:** After moving `search_listings` onto MCP, I
+   would expose another FitFindr tool through MCP and demonstrate a run through
+   that path.
+2. **Retry with looser constraints:** When a search fails because of a size
+   constraint, retry once without size and clearly say what was dropped.
+3. **Second measured improvement:** Make a second change based on diagnosis and
+   run a third evaluation.
 
-2. **Retry with looser constraints:** If a search returns no results because of
-   a size constraint, the agent will retry once without the size filter and
-   clearly tell the user that the size constraint was dropped.
+These declarations were committed before the stretch features were built.
 
-3. **Second measured improvement:** After diagnosing the baseline test results,
-   I will make a second change based on the diagnosis, run the full five-criterion
-   evaluation again, and compare the third run log with the earlier results.
 ---
 
 ## Run Log — Before
 
-<!-- Five criteria, five tries each, in this exact format.
+Raw log:
 
-     Five, because your criteria are written out of five. Mark each try PASS
-     or FAIL, count the passes, and read that count against your target — a
-     row targeting 4 of 5 with three PASS cells is MISSED (3/5).
+```text
+results/run_2026-10-11_1753_before.md
+```
 
-     `python run_eval.py --label before` runs everything and writes the table
-     into results/. Paste it here and fill in the verdicts. -->
+Produced by:
+
+```text
+run_eval.py::main
+```
+
+Agent loop:
+
+```text
+agent.py::run_agent
+```
+
+The original five criteria in `criteria.md` were not changed.
 
 | Criterion | Target | Try 1 | Try 2 | Try 3 | Try 4 | Try 5 | Verdict |
 |---|---|---|---|---|---|---|---|
-| 1.  |  |  |  |  |  |  |  |
-| 2.  |  |  |  |  |  |  |  |
-| 3.  |  |  |  |  |  |  |  |
-| 4.  |  |  |  |  |  |  |  |
-| 5.  |  |  |  |  |  |  |  |
+| 1. Matching query completes all three tools | ≥4/5 | PASS | PASS | PASS | PASS | PASS | MET — 5/5 |
+| 2. Impossible query stops before second tool | 5/5 | PASS | PASS | PASS | PASS | PASS | MET — 5/5 |
+| 3. Selected item preserved through session state | 5/5 | PASS | PASS | PASS | PASS | PASS | MET — 5/5 |
+| 4. Fit card includes selected item, price, and platform | ≥4/5 | PASS | PASS | PASS | PASS | PASS | MET — 5/5 |
+| 5. Search respects maximum price | 5/5 | PASS | PASS | PASS | PASS | PASS | MET — 5/5 |
 
-**Real output from one try**, pasted as text, naming the file and function
-that produced it:
+### Real output from one baseline try
+
+This output came from:
 
 ```text
+results/run_2026-10-11_1753_before.md
+run_eval.py::main
+agent.py::run_agent
+```
 
+```text
+Query: vintage graphic tee under $30
+
+selected_item:
+Y2K Baby Tee — Butterfly Print ($18.0, depop)
+
+search_results: 10
+
+Trace:
+
+[1] search_listings (via MCP)
+      in:  dict with keys: description, size, max_price
+      out: 10 items: Y2K Baby Tee — Butterfly Print,
+           Graphic Tee — 2003 Tour Bootleg Style,
+           Vintage Band Tee — Faded Grey … +7 more
+      →    matches found; selecting the first result
+
+[2] suggest_outfit
+      in:  dict with keys: new_item, wardrobe_items
+
+[3] create_fit_card
+      in:  dict with keys: outfit, new_item
+
+Fit card:
+
+Found the ultimate Y2K butterfly baby tee while thrifting today and I’m
+literally obsessed. Scored it for just $18.00 and just posted it over on Depop
+if anyone wants it! Paired it with baggy denim and chunky sneakers for that
+effortless, loose-on-the-bottom streetwear vibe.
 ```
 
 ---
 
 ## Verdicts and Diagnoses
 
-<!-- MET or MISSED per criterion against LAST UNIT's target, plus a sentence on
-     how you decided.
-
-     Then, for every miss: which of the four places it happened — a tool, the
-     loop's branch, the session, or the model's output — AND the mechanism.
-
-     Not a diagnosis:  "The fit card was bad."
-     A diagnosis:      "The fit card criterion missed on 2 of 5 items. Both had
-                        an empty brand field. My prompt puts the brand in the
-                        first sentence, so the card opened with a blank and read
-                        like a fragment. The tool worked; the prompt assumed a
-                        field that isn't always there."
-
-     Look for a pattern. Three misses on the same tool is one problem, not
-     three. -->
-
 | # | Criterion | Target | Verdict | How I decided |
 |---|---|---|---|---|
-| 1 |  |  |  |  |
-| 2 |  |  |  |  |
-| 3 |  |  |  |  |
-| 4 |  |  |  |  |
-| 5 |  |  |  |  |
+| 1 | Matching query completes all three tools | ≥4/5 | MET — 5/5 | Every try searched, generated an outfit, and generated a fit card. |
+| 2 | Impossible query stops before second tool | 5/5 | MET — 5/5 | Every impossible-query try stopped after search and never called `suggest_outfit`. |
+| 3 | Selected item preserved through session state | 5/5 | MET — 5/5 | The same selected listing was stored in session and used in the downstream outfit step on every try. |
+| 4 | Fit card includes selected item, price, and platform | ≥4/5 | MET — 5/5 | All five captions referred to the selected denim jacket, its $42 price, and Poshmark. |
+| 5 | Search respects maximum price | 5/5 | MET — 5/5 | Every returned result for the `$25` scenario stayed at or below the requested maximum. |
 
-**Diagnoses**
+### Diagnosis
+
+None of the original five criteria missed their Unit 3 targets.
+
+Because there were no misses, I looked for a target that was too easy.
+
+The clearest one was **Criterion 4**. Its original target only required the
+fit card to *mention* the item, price, and platform in at least 4 of 5 tries.
+The baseline technically passed, but the model regularly paraphrased the item
+title and formatted the price inconsistently.
+
+I therefore defined a stricter diagnostic target without changing the original
+criterion:
+
+> **Tighter Criterion 4 target:** In 5 of 5 tries, the fit card should contain
+> the exact selected listing title, the exact two-decimal price such as
+> `$42.00`, and the exact platform.
+
+Against that stricter target, the baseline denim-jacket outputs scored:
+
+```text
+0/5
+```
+
+The mechanism was in the `create_fit_card` generation prompt. It asked the
+model to mention the listing information, but it did not tell the model that
+those fields had to be reproduced exactly. The model therefore legitimately
+paraphrased them.
+
+I did **not** lower or rewrite the original acceptance criterion.
+
+---
+
+## Failure Modes Triggered on Purpose
+
+### 1. Empty search
+
+Command:
+
+```text
+python app.py ask 'designer ballgown size XXS under $5' --trace
+```
+
+The search returned no result. After the retry feature was added, the agent also
+retried once without `XXS`, still received no results, and stopped before
+`suggest_outfit`.
+
+Current behavior:
+
+```text
+[1] search_listings (via MCP)
+      in:  dict with keys: description, size, max_price
+      out: [] (empty)
+      →    no matches; retrying once without the size filter 'XXS'
+
+[2] search_listings retry (via MCP)
+      in:  dict with keys: description, size, max_price
+      out: [] (empty)
+      →    dropped size constraint 'XXS'
+
+I couldn't find a matching item. I retried without the size filter
+(dropped size XXS) and still found nothing. Try changing the description
+or maximum price.
+```
+
+This is actionable because it tells the user what was tried and what they can
+change.
+
+### 2. Empty wardrobe
+
+Command:
+
+```text
+python app.py ask 'denim jacket under $50' --empty-wardrobe
+```
+
+The agent did not crash. `suggest_outfit` detected that the wardrobe contained
+no saved items and returned general styling guidance instead.
+
+### 3. Model unavailable
+
+The model failure was deliberately triggered using an invalid key and cache
+disabled.
+
+The trace reached `suggest_outfit`, caught `ModelUnavailable`, and returned:
+
+```text
+The AI model couldn't be reached, so I couldn't create an outfit suggestion.
+Check your API key or internet connection, then try again.
+```
+
+The failure is handled instead of producing a Python traceback for the user.
 
 ---
 
 ## Loop Trace
 
-<!-- One full run, printed step by step, with the MCP call visible in it.
+### Happy path
 
-     `python app.py ask '...' --trace` once you've added the trace.step()
-     calls in Milestone 2.
-
-     Worth pasting BOTH the happy path and the empty-search path. The empty
-     one should be visibly shorter, because it stops. If your two traces are
-     the same length, your branch isn't working — and this is the fastest way
-     anyone will ever find that out. -->
-
-**Happy path**
+This is a current run after both MCP migrations:
 
 ```text
+$ python app.py ask 'vintage graphic tee under $30' --trace
 
+[1] search_listings (via MCP)
+      in:  dict with keys: description, size, max_price
+      out: 3 items: Graphic Tee — 2003 Tour Bootleg Style,
+           Vintage Band Tee — Faded Grey,
+           Y2K Baby Tee — Butterfly Print
+      →    matches found; selecting the first result
+
+[2] suggest_outfit
+      in:  dict with keys: new_item, wardrobe_items
+      out: Here are two outfit options using your 2003 tour graphic tee ...
+
+[3] create_fit_card (via MCP)
+      in:  dict with keys: outfit, new_item
+      out: I can't believe I scored this Graphic Tee — 2003 Tour Bootleg Style
+           for only $24.00 on depop! ...
 ```
 
-**Empty search**
+The trace visibly shows both MCP calls and the local model tool between them.
+
+### Empty path
 
 ```text
+[1] search_listings (via MCP)
+      in:  dict with keys: description, size, max_price
+      out: [] (empty)
+      →    no matches; retrying once without the size filter 'XXS'
 
+[2] search_listings retry (via MCP)
+      in:  dict with keys: description, size, max_price
+      out: [] (empty)
+      →    dropped size constraint 'XXS'
 ```
 
-**On the MCP move:** <!-- what changed in your code, and whether anything
-behaved differently afterwards. If the rewire didn't work, say exactly where it
-broke — the error text and the last thing that worked. That earns the point in
-full. -->
+There is no `suggest_outfit` or `create_fit_card` call after the second empty
+result.
+
+### On the MCP move
+
+The required MCP migration was `search_listings`.
+
+Instead of importing and calling the function directly, `run_agent()` now uses:
+
+```python
+call_tool(
+    "search_listings",
+    search_inputs,
+)
+```
+
+`mcp_server.py` registers the tool with typed inputs, while `mcp_client.py`
+starts the server, calls the tool, and converts the MCP response back to its
+native Python value.
+
+The behavior stayed compatible with the rest of the planning loop: a successful
+search still returned `list[dict]`, while a failed search returned `[]`.
 
 ---
 
-## The Improvement
+# Improvement 1 — Stricter Fit-Card Metadata
 
-<!-- What you changed, why your diagnosis pointed at it, and the after-run in
-     the same table format. One change, measured properly.
+## What I changed
 
-     `python run_eval.py --label after` -->
+I rewrote the `create_fit_card` prompt so that it explicitly requires:
 
-**What I changed:**
+- the exact listing title,
+- the exact two-decimal price,
+- the exact platform,
+- and prohibits paraphrasing or reformatting those three fields.
 
-**Which failure it was meant to fix:**
+For example, the prompt now supplies:
 
-### Run Log — After
+```text
+Exact item title: Denim Jacket — Light Wash, Cropped
+Exact price: $42.00
+Exact platform: poshmark
+```
+
+and instructs the model to reproduce those values exactly.
+
+## Which diagnosis it addressed
+
+This change addressed the stricter version of Criterion 4 identified in the
+baseline diagnosis.
+
+The original criterion passed, but the model was free to change:
+
+```text
+Denim Jacket — Light Wash, Cropped
+```
+
+into wording such as:
+
+```text
+cropped light wash denim jacket
+```
+
+and to turn:
+
+```text
+$42.00
+```
+
+into:
+
+```text
+$42
+```
+
+The issue was therefore in the generation prompt rather than search, session
+state, or the planning branch.
+
+---
+
+## Run Log — After Improvement 1
+
+Raw log:
+
+```text
+results/run_2026-10-11_1758_after.md
+```
 
 | Criterion | Target | Try 1 | Try 2 | Try 3 | Try 4 | Try 5 | Verdict |
 |---|---|---|---|---|---|---|---|
-| 1.  |  |  |  |  |  |  |  |
-| 2.  |  |  |  |  |  |  |  |
-| 3.  |  |  |  |  |  |  |  |
-| 4.  |  |  |  |  |  |  |  |
-| 5.  |  |  |  |  |  |  |  |
+| 1. Matching query completes all three tools | ≥4/5 | PASS | PASS | PASS | PASS | PASS | MET — 5/5 |
+| 2. Impossible query stops before second tool | 5/5 | PASS | PASS | PASS | PASS | PASS | MET — 5/5 |
+| 3. Selected item preserved through session state | 5/5 | PASS | PASS | PASS | PASS | PASS | MET — 5/5 |
+| 4. Fit card includes selected item, price, and platform | ≥4/5 | PASS | PASS | PASS | PASS | PASS | MET — 5/5 |
+| 5. Search respects maximum price | 5/5 | PASS | PASS | PASS | PASS | PASS | MET — 5/5 |
 
-**Did it help, and how do I know:**
+### Stricter Criterion 4 measurement
 
-<!-- If it made things worse, say that. Honestly reported, that earns full
-     credit and is more interesting than one that worked. -->
+Using the stricter target:
 
----
+```text
+exact title + exact $42.00 price + exact platform
+```
 
-## What's Still Broken
+the result changed from:
 
-<!-- For each criterion still missed: what you'd do, and why you stopped where
-     you did. "I ran out of time" is fine if it's true. Pretending nothing is
-     left is not. -->
+```text
+Before: 0/5
+After:  5/5
+```
 
-<!-- ═════════════════════════════════════════════════════════════════════
+Example after output:
 
-     SUBMISSION CHECKLIST — unit 3
+```text
+So obsessed with my new Denim Jacket — Light Wash, Cropped that I scored on
+poshmark for only $42.00! It gives off the ultimate effortless streetwear vibe
+when I style it with baggy bottoms and chunky sneakers.
+```
 
-       [ ] criteria.md has five numbered criteria, each with a target
-       [ ] Each criterion has a reason underneath it
-       [ ] All five unit 3 sections above have real content
-       [ ] Tool Inventory: all three tools, inputs WITH TYPES, a specific
-           return value, and the empty case
-       [ ] Planning Loop names the branch rule and agent.py::run_agent
-       [ ] Sample Run: one full query plus the three per-tool tests, as text
-       [ ] At least four new commits
-       [ ] Repository URL submitted — WRITE IT DOWN, you submit the same one
-           next unit
+## Did it help?
 
-     SUBMISSION CHECKLIST — unit 4
+Yes.
 
-       [ ] mcp_server.py exists with one tool registered
-           (or a written record of exactly where the rewire broke)
-       [ ] Run Log — Before, five criteria, five tries each
-       [ ] Real output pasted underneath, naming file and function
-       [ ] A verdict on every criterion
-       [ ] A diagnosis for every miss, naming a place AND a mechanism
-       [ ] Loop Trace, with the MCP call visible in it
-       [ ] All three failure modes triggered and handled
-       [ ] One improvement, with Run Log — After in the same format
-       [ ] What's Still Broken
-       [ ] At least four new commits
-       [ ] The SAME repository URL as last unit
+The five original acceptance criteria remained MET, and the stricter metadata
+check improved from **0/5 to 5/5**.
 
-     Do not delete and recreate this repository. Your commit history is what
-     shows your criteria existed before your results did.
-     ═════════════════════════════════════════════════════════════════════ -->
+That shows the prompt change fixed the specific formatting problem identified
+in the diagnosis.
 
 ---
 
-📖 **How to run this project: [RUNNING.md](RUNNING.md)**
+# Stretch Feature — Retry With Looser Constraints
+
+The retry stretch was declared before implementation.
+
+When a size-constrained search returns nothing, the agent now retries exactly
+once with:
+
+```python
+size=None
+```
+
+It also tells the user that the size constraint was removed.
+
+Diagnostic query:
+
+```text
+90s track jacket size XS
+```
+
+Trace:
+
+```text
+[1] search_listings (via MCP)
+      in:  dict with keys: description, size, max_price
+      out: [] (empty)
+      →    no matches; retrying once without the size filter 'XS'
+
+[2] search_listings retry (via MCP)
+      in:  dict with keys: description, size, max_price
+      out: 2 items: 90s Track Jacket — Navy/White Stripe,
+                    Denim Jacket — Light Wash, Cropped
+      →    dropped size constraint 'XS'
+
+[3] suggest_outfit
+      in:  dict with keys: new_item, wardrobe_items
+
+[4] create_fit_card
+      in:  dict with keys: outfit, new_item
+```
+
+The user-facing notice is:
+
+```text
+No matches were found in size XS, so I retried without the size filter.
+```
+
+---
+
+# Improvement 2 — Item-Type Search Ranking
+
+## Diagnosis
+
+While testing the new retry branch, I found another quality problem.
+
+For:
+
+```text
+90s track jacket size XS
+```
+
+the first search correctly returned nothing.
+
+The retry correctly removed the `XS` size constraint, but the earlier search
+ranking could select a **bucket hat** instead of the requested track jacket.
+
+The problem was in `search_listings`.
+
+The search gave credit to overlapping words such as:
+
+```text
+90s
+```
+
+without giving enough importance to the requested item type:
+
+```text
+jacket
+```
+
+That meant an unrelated listing could rank highly after constraints were
+loosened.
+
+## What I changed
+
+I changed the search scoring so that clothing-type words such as:
+
+```text
+jacket
+dress
+tee
+boots
+hat
+```
+
+receive stronger weight.
+
+When a query explicitly names an item type, the listing must now match that
+item type in an important field such as its title, category, or style metadata.
+
+This was one isolated search-ranking change.
+
+---
+
+## Run Log — Second Improvement
+
+Raw third run:
+
+```text
+results/run_2026-10-11_1812_second_improvement.md
+```
+
+The original five criteria remain in the same comparison format:
+
+| Criterion | Target | Try 1 | Try 2 | Try 3 | Try 4 | Try 5 | Verdict |
+|---|---|---|---|---|---|---|---|
+| 1. Matching query completes all three tools | ≥4/5 | PASS | PASS | PASS | PASS | PASS | MET — 5/5 |
+| 2. Impossible query stops before second tool | 5/5 | PASS | PASS | PASS | PASS | PASS | MET — 5/5 |
+| 3. Selected item preserved through session state | 5/5 | PASS | PASS | PASS | PASS | PASS | MET — 5/5 |
+| 4. Fit card includes selected item, price, and platform | ≥4/5 | PASS | PASS | PASS | PASS | PASS | MET — 5/5 |
+| 5. Search respects maximum price | 5/5 | PASS | PASS | PASS | PASS | PASS | MET — 5/5 |
+
+I also added one diagnostic scenario without changing the five official
+criteria:
+
+| Diagnostic scenario | Target | Try 1 | Try 2 | Try 3 | Try 4 | Try 5 | Result |
+|---|---|---|---|---|---|---|---|
+| Retry without size selects requested item type | Track jacket selected | PASS | PASS | PASS | PASS | PASS | 5/5 |
+
+Every diagnostic try selected:
+
+```text
+90s Track Jacket — Navy/White Stripe ($45.0, poshmark)
+```
+
+instead of an unrelated item.
+
+## Did Improvement 2 help?
+
+Yes for the ranking defect that motivated the change.
+
+The original five acceptance-criterion scores stayed at **5/5**, so this
+improvement did not change their official verdicts.
+
+However, the problematic fallback search changed from selecting an unrelated
+bucket hat in the manual pre-change test to selecting:
+
+```text
+90s Track Jacket — Navy/White Stripe
+```
+
+in **5/5 diagnostic tries** after the ranking change.
+
+So the improvement fixed the diagnosed ranking behavior while preserving all
+five original acceptance-criterion results.
+
+---
+
+# Stretch Feature — Second Tool on MCP
+
+The second MCP tool was also declared before implementation.
+
+The final `mcp_server.py` exposes:
+
+```text
+search_listings
+create_fit_card
+```
+
+Running:
+
+```text
+python mcp_client.py
+```
+
+shows:
+
+```text
+search_listings
+    - description: string
+    - size: string (optional)
+    - max_price: number (optional)
+
+create_fit_card
+    - outfit: string
+    - new_item: object
+```
+
+The agent now calls both tools through MCP.
+
+A final traced run proves the second MCP path is actually used:
+
+```text
+[1] search_listings (via MCP)
+      in:  dict with keys: description, size, max_price
+      out: 3 items: Graphic Tee — 2003 Tour Bootleg Style,
+           Vintage Band Tee — Faded Grey,
+           Y2K Baby Tee — Butterfly Print
+      →    matches found; selecting the first result
+
+[2] suggest_outfit
+      in:  dict with keys: new_item, wardrobe_items
+
+[3] create_fit_card (via MCP)
+      in:  dict with keys: outfit, new_item
+      out: I can't believe I scored this Graphic Tee — 2003 Tour Bootleg Style
+           for only $24.00 on depop! ...
+```
+
+This demonstrates that `create_fit_card` was not only registered on the MCP
+server but was also used through the MCP client by the actual planning loop.
+
+---
+
+# What's Still Broken
+
+None of the five original acceptance criteria are currently missed.
+
+There are still limitations outside those five criteria.
+
+### Search is still primarily keyword based
+
+The improved ranking handles explicit item types much better, but it is not a
+full semantic fashion-search system. A vague query using synonyms that do not
+appear in listing metadata could still rank poorly.
+
+A next improvement would be to combine the deterministic filters with semantic
+or hybrid search.
+
+### Query parsing is intentionally simple
+
+`parse_query()` uses regular expressions for prices and explicit `size ...`
+phrasing.
+
+More conversational requests could require a more robust structured parser.
+
+### Model-backed tools still depend on model availability
+
+`suggest_outfit` and the implementation behind `create_fit_card` require the
+configured model to be available.
+
+The agent now handles model failure with an actionable message, but it cannot
+produce model-generated styling content while the model itself is unavailable.
+
+These limitations did not cause any of the original five acceptance criteria
+to miss during the measured runs, so I stopped here rather than adding
+unmeasured changes after the experiments.
+
+---
+
+# Evaluation Summary
+
+### Baseline
+
+```text
+results/run_2026-10-11_1753_before.md
+```
+
+Original acceptance criteria:
+
+```text
+Criterion 1: 5/5 — MET
+Criterion 2: 5/5 — MET
+Criterion 3: 5/5 — MET
+Criterion 4: 5/5 — MET
+Criterion 5: 5/5 — MET
+```
+
+Stricter exact-metadata diagnostic:
+
+```text
+0/5
+```
+
+### After Improvement 1
+
+```text
+results/run_2026-10-11_1758_after.md
+```
+
+Original criteria remained:
+
+```text
+5/5
+5/5
+5/5
+5/5
+5/5
+```
+
+Stricter exact-metadata diagnostic:
+
+```text
+5/5
+```
+
+### After Improvement 2
+
+```text
+results/run_2026-10-11_1812_second_improvement.md
+```
+
+Original criteria remained:
+
+```text
+5/5
+5/5
+5/5
+5/5
+5/5
+```
+
+Retry/item-type diagnostic:
+
+```text
+5/5
+```
+
+No original criterion was revised or lowered after seeing the results.
+
+---
+
+# Final Unit 4 Feature Summary
+
+Required work completed:
+
+- `search_listings` moved onto MCP
+- three failure modes intentionally triggered and handled
+- full loop tracing added
+- five original criteria tested five times each
+- baseline verdicts recorded
+- no-miss diagnosis supplied by tightening Criterion 4
+- first improvement measured with a complete second run
+- before and after results compared
+- remaining limitations documented
+
+Declared stretch work completed:
+
+- second MCP tool: `create_fit_card`
+- retry once without size and explicitly report dropped constraint
+- second measured improvement
+- third evaluation run
+- diagnostic retry scenario succeeded 5/5
+
+---
+
+# Final Verification
+
+The project was syntax checked throughout development using commands such as:
+
+```text
+python -m py_compile agent.py
+python -m py_compile tools.py
+python -m py_compile scenarios.py
+python -m py_compile mcp_server.py
+```
+
+The project test suite was also run after the changes:
+
+```text
+python test.py
+```
+
+Result:
+
+```text
+10 passed
+```
+
+The same repository from Unit 3 was retained so the Git commit history preserves
+the original acceptance criteria and the order of the Unit 4 testing work.
+
+---
+
+## Running the Project
+
+See:
+
+[RUNNING.md](RUNNING.md)
