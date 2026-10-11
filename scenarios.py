@@ -1,66 +1,103 @@
 """
-The runs your test needs. ← UNIT 4, MILESTONE 3
+Evaluation scenarios for FitFindr — Unit 4.
 
-Each of your five criteria needs something run against it. A criterion about
-the empty-search branch needs an impossible query. One about the fit card needs
-the same item run more than once. Working that out is Milestone 3's first step,
-and this file is where you write it down.
+Each scenario maps directly to one acceptance criterion in criteria.md.
 
-`run_eval.py` runs everything here five times and writes the run log — five
-because your criteria are written out of five.
-
-Three scenarios are filled in to show the shape. Add or change whatever your
-own criteria need — these are a starting point, not a fixed set.
+run_eval.py executes every scenario five times with caching disabled.
 """
 
 SCENARIOS = [
     {
-        # A query the data can match. Criterion 1.
-        "name": "matching query completes",
+        # Criterion 1:
+        # A matching query should complete the full three-tool path.
+        "name": "matching query completes all three tools",
         "query": "vintage graphic tee under $30",
         "wardrobe": "example",
         "criterion": 1,
     },
     {
-        # A query nothing can match. Criterion 2 — the branch.
-        "name": "impossible query stops early",
+        # Criterion 2:
+        # An impossible query should stop after search_listings.
+        "name": "impossible query stops before second tool",
         "query": "designer ballgown size XXS under $5",
         "wardrobe": "example",
         "criterion": 2,
     },
     {
-        # A user with nothing saved. One of unit 4's three failure modes.
-        "name": "empty wardrobe",
-        "query": "denim jacket under $50",
-        "wardrobe": "empty",
-        "criterion": None,
+        # Criterion 3:
+        # The selected search result should remain the same item
+        # when it moves through session state to suggest_outfit.
+        "name": "selected item preserved through session state",
+        "query": "90s track jacket in size M",
+        "wardrobe": "example",
+        "criterion": 3,
     },
-    # TODO: add what your criteria 3, 4 and 5 need.
-    #
-    # Set "criterion" to the number in criteria.md that the scenario tests.
-    # "criterion": None means a diagnostic run — useful to have, but it isn't
-    # one of your five, and run_eval.py marks it as such in the table.
-    #
-    # For a state criterion, any normal query works — what you're checking is
-    # what ends up in the session, not what the user typed.
-    #
-    # For a fit-card criterion, you probably want the SAME query listed more
-    # than once, or several different items, depending on what your criterion
-    # actually says.
+    {
+        # Criterion 4:
+        # The final fit card should mention the selected item,
+        # its price, and its resale platform.
+        "name": "fit card includes key listing details",
+        "query": "denim jacket under $50",
+        "wardrobe": "example",
+        "criterion": 4,
+    },
+    {
+        # Criterion 5:
+        # Every search result must respect the user's maximum price.
+        "name": "search respects maximum price",
+        "query": "graphic tee under $25",
+        "wardrobe": "example",
+        "criterion": 5,
+    },
 ]
+
 
 WARDROBES = ("example", "empty")
 
 
 def validate() -> list[str]:
-    """Complain about anything malformed, before a long run rather than during."""
+    """
+    Validate the evaluation scenarios before a long test run.
+
+    Returns a list of problems. An empty list means the scenarios are valid.
+    """
+
     problems = []
+
+    seen_criteria = set()
+
     for i, scenario in enumerate(SCENARIOS, 1):
+        if not scenario.get("name", "").strip():
+            problems.append(f"scenario {i} has no name")
+
         if not scenario.get("query", "").strip():
             problems.append(f"scenario {i} has no query")
+
         if scenario.get("wardrobe") not in WARDROBES:
             problems.append(
-                f"scenario {i} has wardrobe {scenario.get('wardrobe')!r} — "
+                f"scenario {i} has wardrobe "
+                f"{scenario.get('wardrobe')!r} — "
                 f"it should be one of {WARDROBES}"
             )
+
+        criterion = scenario.get("criterion")
+
+        if criterion not in {1, 2, 3, 4, 5}:
+            problems.append(
+                f"scenario {i} has invalid criterion {criterion!r}"
+            )
+        elif criterion in seen_criteria:
+            problems.append(
+                f"criterion {criterion} appears more than once"
+            )
+        else:
+            seen_criteria.add(criterion)
+
+    missing = {1, 2, 3, 4, 5} - seen_criteria
+
+    for criterion in sorted(missing):
+        problems.append(
+            f"criterion {criterion} has no evaluation scenario"
+        )
+
     return problems
