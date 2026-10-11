@@ -268,11 +268,21 @@ This verifies the tool's empty-outfit behavior without causing an exception.
 - **What came back:** We inspected the relevant lines and found that `parse_query()` had accidentally been placed inside `new_session()`.
 - **What I changed:** I moved `parse_query()` back to the module level, verified the file with `python -m py_compile agent.py`, and implemented the planning loop using session state, a `step` variable, and `trace.check_iterations(count)`. I then tested both the successful branch and the no-results branch before committing the implementation.
 
-<!-- ═══════════════════════ UNIT 4 — THE TEST ═══════════════════════
+## Unit 4 Stretch Features — Declared Before Build
 
-     Don't fill these in during unit 3.
-     ═══════════════════════════════════════════════════════════════════ -->
+For Unit 4, I plan to attempt all three stretch features:
 
+1. **Second tool moved onto MCP:** After the required `search_listings` MCP
+   migration is working, I will also expose a second FitFindr tool through MCP
+   and show a run that uses that MCP path.
+
+2. **Retry with looser constraints:** If a search returns no results because of
+   a size constraint, the agent will retry once without the size filter and
+   clearly tell the user that the size constraint was dropped.
+
+3. **Second measured improvement:** After diagnosing the baseline test results,
+   I will make a second change based on the diagnosis, run the full five-criterion
+   evaluation again, and compare the third run log with the earlier results.
 ---
 
 ## Run Log — Before
