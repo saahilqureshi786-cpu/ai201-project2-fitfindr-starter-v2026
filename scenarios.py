@@ -1,9 +1,11 @@
 """
 Evaluation scenarios for FitFindr — Unit 4.
 
-Each scenario maps directly to one acceptance criterion in criteria.md.
+The first five scenarios map directly to the five acceptance criteria
+written in criteria.md during Unit 3.
 
-run_eval.py executes every scenario five times with caching disabled.
+The final scenario is a Unit 4 diagnostic/stretch scenario used to measure
+the retry-without-size behavior and the search-ranking improvement.
 """
 
 SCENARIOS = [
@@ -17,7 +19,7 @@ SCENARIOS = [
     },
     {
         # Criterion 2:
-        # An impossible query should stop after search_listings.
+        # An impossible query should stop before suggest_outfit.
         "name": "impossible query stops before second tool",
         "query": "designer ballgown size XXS under $5",
         "wardrobe": "example",
@@ -26,7 +28,7 @@ SCENARIOS = [
     {
         # Criterion 3:
         # The selected search result should remain the same item
-        # when it moves through session state to suggest_outfit.
+        # when it moves through session state.
         "name": "selected item preserved through session state",
         "query": "90s track jacket in size M",
         "wardrobe": "example",
@@ -34,8 +36,8 @@ SCENARIOS = [
     },
     {
         # Criterion 4:
-        # The final fit card should mention the selected item,
-        # its price, and its resale platform.
+        # The fit card should contain the selected item,
+        # price, and platform.
         "name": "fit card includes key listing details",
         "query": "denim jacket under $50",
         "wardrobe": "example",
@@ -43,61 +45,124 @@ SCENARIOS = [
     },
     {
         # Criterion 5:
-        # Every search result must respect the user's maximum price.
+        # Every result must respect the user's maximum price.
         "name": "search respects maximum price",
         "query": "graphic tee under $25",
         "wardrobe": "example",
         "criterion": 5,
     },
+    {
+        # Unit 4 stretch / diagnostic:
+        #
+        # There is a 90s track jacket in the data, but not in XS.
+        # The first search should return no results.
+        #
+        # The agent should then retry once without the size filter.
+        # After the search-ranking improvement, the selected item
+        # should be:
+        #
+        # 90s Track Jacket — Navy/White Stripe
+        #
+        # This is intentionally not one of the original five criteria.
+        "name": "retry without size selects requested item type",
+        "query": "90s track jacket size XS",
+        "wardrobe": "example",
+        "criterion": None,
+    },
 ]
 
 
-WARDROBES = ("example", "empty")
+WARDROBES = (
+    "example",
+    "empty",
+)
 
 
 def validate() -> list[str]:
     """
-    Validate the evaluation scenarios before a long test run.
+    Validate the evaluation scenarios before running the full test.
 
-    Returns a list of problems. An empty list means the scenarios are valid.
+    The original five grading criteria must each appear exactly once.
+
+    Additional diagnostic scenarios are allowed when criterion is None.
     """
 
     problems = []
-
     seen_criteria = set()
 
-    for i, scenario in enumerate(SCENARIOS, 1):
-        if not scenario.get("name", "").strip():
-            problems.append(f"scenario {i} has no name")
+    for i, scenario in enumerate(
+        SCENARIOS,
+        1,
+    ):
+        if not scenario.get(
+            "name",
+            "",
+        ).strip():
+            problems.append(
+                f"scenario {i} has no name"
+            )
 
-        if not scenario.get("query", "").strip():
-            problems.append(f"scenario {i} has no query")
+        if not scenario.get(
+            "query",
+            "",
+        ).strip():
+            problems.append(
+                f"scenario {i} has no query"
+            )
 
-        if scenario.get("wardrobe") not in WARDROBES:
+        if scenario.get(
+            "wardrobe"
+        ) not in WARDROBES:
             problems.append(
                 f"scenario {i} has wardrobe "
                 f"{scenario.get('wardrobe')!r} — "
                 f"it should be one of {WARDROBES}"
             )
 
-        criterion = scenario.get("criterion")
+        criterion = scenario.get(
+            "criterion"
+        )
 
-        if criterion not in {1, 2, 3, 4, 5}:
+        # None is allowed for diagnostic scenarios.
+        if criterion is None:
+            continue
+
+        if criterion not in {
+            1,
+            2,
+            3,
+            4,
+            5,
+        }:
             problems.append(
-                f"scenario {i} has invalid criterion {criterion!r}"
+                f"scenario {i} has invalid "
+                f"criterion {criterion!r}"
             )
-        elif criterion in seen_criteria:
+
+            continue
+
+        if criterion in seen_criteria:
             problems.append(
-                f"criterion {criterion} appears more than once"
+                f"criterion {criterion} "
+                "appears more than once"
             )
+
         else:
-            seen_criteria.add(criterion)
+            seen_criteria.add(
+                criterion
+            )
 
-    missing = {1, 2, 3, 4, 5} - seen_criteria
+    missing = (
+        {1, 2, 3, 4, 5}
+        - seen_criteria
+    )
 
-    for criterion in sorted(missing):
+    for criterion in sorted(
+        missing
+    ):
         problems.append(
-            f"criterion {criterion} has no evaluation scenario"
+            f"criterion {criterion} "
+            "has no evaluation scenario"
         )
 
     return problems
